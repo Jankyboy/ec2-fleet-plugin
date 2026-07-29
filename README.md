@@ -128,8 +128,10 @@ Add an inline policy to the IAM user or EC2 instance role to allow it to use EC2
       "Effect": "Allow",
       "Action": [
         "autoscaling:DescribeAutoScalingGroups",
-        "autoscaling:TerminateInstanceInAutoScalingGroup",
-        "autoscaling:UpdateAutoScalingGroup"
+        "autoscaling:DescribeWarmPool",
+        "autoscaling:UpdateAutoScalingGroup",
+        "autoscaling:SetInstanceProtection",
+        "autoscaling:TerminateInstanceInAutoScalingGroup"
       ],
       "Resource": "*"
     },
@@ -196,6 +198,27 @@ You can specify the scaling limits in your cloud settings. By default, Jenkins w
 if there are enough tasks waiting in the build queue and scale down idle nodes after a specified idleness period.
 
 You can use the History tab in the AWS console to view the scaling history.
+
+### Scaling down an Auto Scaling Group with a warm pool
+
+By default, when the plugin scales down an Auto Scaling Group it terminates the idle instance directly
+via `TerminateInstanceInAutoScalingGroup`. This is intentional: relying on the ASG's own scale-in process
+to eventually remove the instance can lag significantly in high-volume environments, so the plugin asks
+AWS to take immediate action instead. This is the same behavior as before warm pool support was added, and
+it is what you get unless your ASG has a
+[warm pool](https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-warm-pools.html) configured
+with an [instance reuse policy](https://docs.aws.amazon.com/autoscaling/ec2/userguide/warm-pool-instance-reuse-policy.html)
+that reuses instances on scale-in (`ReuseOnScaleIn: true`).
+
+When such a warm pool is detected, scaling down instead removes the instance's scale-in protection and lets
+the ASG itself take over, moving the instance into the warm pool instead of terminating it. This lets a
+future build reuse an already-provisioned, cache-warm instance rather than waiting for a brand-new one to
+launch. Instances that reached `maxTotalUses` are always terminated directly regardless of the warm pool
+configuration, since a worn-out instance must never be handed back for reuse.
+
+This check is done via `autoscaling:DescribeWarmPool`, which the IAM policy above already grants; no extra
+configuration is needed to opt in or out — the plugin decides automatically based on how the ASG itself is
+set up.
 
 ## Preconfigure Agent
 
